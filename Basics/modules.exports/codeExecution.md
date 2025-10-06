@@ -126,3 +126,5 @@ JavaScript engines like V8 use a multi-stage pipeline to execute code efficientl
 - [MDN JavaScript Guide](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide)
 
 ---
+
+Feel free to fork, contribute, or use this as a teaching resource!

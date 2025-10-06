@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Node.js Event Loop Visualizer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #e4e4e7;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            overflow-x: hidden;
+            font-size: 14px;
+            line-height: 1.6;
+            font-weight: 400;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 320px 1fr 320px;
+            height: 100vh;
+            gap: 16px;
+            padding: 16px;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        .left-panel, .right-panel {
+            background: #111111;
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid #262626;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            overflow-y: auto;
+        }
+
+        .visualizer {
+            position: relative;
+            background: #111111;
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid #262626;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+        }
+
+        .title {
+            text-align: center;
+            font-size: 1.75rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6, #06b6d4);
+            background-size: 200% 200%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: gradientShift 4s ease-in-out infinite;
+        }
+
+        .section-title {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #f1f5f9;
+            letter-spacing: -0.025em;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        .controls {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 24px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            background: #1f2937;
+            color: #f1f5f9;
+            font-weight: 500;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid #374151;
+            font-family: inherit;
+        }
+
+        .btn.primary {
+            background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+            border-color: #2563eb;
+        }
+
+        .btn:hover:not(:disabled) {
+            background: #374151;
+            border-color: #4b5563;
+            transform: translateY(-1px);
+        }
+
+        .btn.primary:hover:not(:disabled) {
+            background: linear-gradient(135deg, #2563eb, #1e40af);
+        }
+
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn:active:not(:disabled) {
+            transform: translateY(0);
+        }
+
+        .code-input {
+            margin-bottom: 24px;
+        }
+
+        .code-editor {
+            width: 100%;
+            height: 240px;
+            background: #0a0a0a;
+            border: 1px solid #262626;
+            border-radius: 8px;
+            padding: 16px;
+            color: #e4e4e7;
+            font-family: 'Fira Code', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            resize: vertical;
+            transition: border-color 0.2s ease;
+            font-weight: 400;
+        }
+
+        .code-editor:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .log-panel {
+            flex: 1;
+            overflow-y: auto;
+            background: #0a0a0a;
+            border-radius: 8px;
+            padding: 16px;
+            border: 1px solid #262626;
+            margin-top: 16px;
+        }
+
+        .log-panel h3 {
+            color: #f1f5f9;
+            margin-bottom: 16px;
+            position: sticky;
+            top: 0;
+            background: #0a0a0a;
+            padding: 8px 0;
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+
+        .log-entry {
+            margin-bottom: 6px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            opacity: 0;
+            transform: translateX(-20px);
+            font-family: 'Fira Code', monospace;
+            line-height: 1.4;
+        }
+
+        .log-entry.queue { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border-left: 2px solid #f59e0b; }
+        .log-entry.execute { background: rgba(34, 197, 94, 0.15); color: #22c55e; border-left: 2px solid #22c55e; }
+        .log-entry.complete { background: rgba(156, 163, 175, 0.15); color: #9ca3af; border-left: 2px solid #9ca3af; }
+        .log-entry.phase { background: rgba(59, 130, 246, 0.15); color: #3b82f6; border-left: 2px solid #3b82f6; font-weight: 600; }
+
+        .event-loop {
+            position: relative;
+            width: 100%;
+            height: 500px;
+            margin: 0 auto;
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .loop-container {
+            position: relative;
+            width: 480px;
+            height: 480px;
+        }
+
+        .phase {
+            position: absolute;
+            width: 100px;
+            height: 100px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, #1f2937, #374151);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #f1f5f9;
+            font-weight: 600;
+            font-size: 11px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            border: 2px solid #374151;
+        }
+
+        .phase:hover {
+            transform: scale(1.05);
+            border-color: #4b5563;
+        }
+
+        .phase.active {
+            background: linear-gradient(135deg, #dc2626, #b91c1c);
+            border-color: #ef4444;
+            box-shadow: 0 0 32px rgba(239, 68, 68, 0.4);
+            transform: scale(1.1);
+            color: #ffffff;
+        }
+
+        .phase.next {
+            border-color: #f59e0b;
+            box-shadow: 0 0 24px rgba(245, 158, 11, 0.3);
+        }
+
+        .arrow {
+            position: absolute;
+            width: 50px;
+            height: 3px;
+            background: linear-gradient(90deg, #6b7280, #4b5563);
+            border-radius: 2px;
+            transform-origin: left center;
+            opacity: 0.7;
+            transition: all 0.3s ease;
+        }
+
+        .arrow::after {
+            content: '';
+            position: absolute;
+            right: -6px;
+            top: -4px;
+            width: 0;
+            height: 0;
+            border-left: 12px solid #4b5563;
+            border-top: 5px solid transparent;
+            border-bottom: 5px solid transparent;
+        }
+
+        .arrow.active {
+            background: linear-gradient(90deg, #ef4444, #dc2626);
+            opacity: 1;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+        }
+
+        .arrow.active::after {
+            border-left-color: #dc2626;
+        }
+
+        .task-block {
+            position: absolute;
+            background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+            padding: 6px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #ffffff;
+            box-shadow: 0 4px 20px rgba(139, 92, 246, 0.3);
+            z-index: 10;
+            opacity: 0;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .microtask-queue, .callback-queue {
+            position: absolute;
+            background: #1a1a1a;
+            border: 1px dashed #404040;
+            border-radius: 12px;
+            padding: 12px;
+            min-width: 140px;
+            min-height: 80px;
+            max-width: 180px;
+        }
+
+        .microtask-queue {
+            top: 20px;
+            right: 20px;
+        }
+
+        .callback-queue {
+            bottom: 20px;
+            right: 20px;
+        }
+
+        .queue-title {
+            font-size: 10px;
+            font-weight: 600;
+            color: #94a3b8;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .queue-item {
+            background: #374151;
+            color: #f1f5f9;
+            padding: 4px 6px;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            font-size: 10px;
+            font-weight: 400;
+            border: 1px solid #4b5563;
+        }
+
+        .status-indicator {
+            position: absolute;
+            top: 16px;
+            left: 16px;
+            background: #1a1a1a;
+            padding: 8px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            border: 1px solid #374151;
+            z-index: 20;
+        }
+
+        .status-indicator.running { 
+            color: #22c55e; 
+            border-color: #22c55e;
+            box-shadow: 0 0 12px rgba(34, 197, 94, 0.2);
+        }
+        .status-indicator.paused { 
+            color: #f59e0b; 
+            border-color: #f59e0b;
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.2);
+        }
+        .status-indicator.stopped { 
+            color: #ef4444; 
+            border-color: #ef4444;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.2);
+        }
+
+        /* Phase positions - adjusted for better spacing */
+        .phase:nth-child(1) { top: 40px; left: 50%; transform: translateX(-50%); } /* Timers */
+        .phase:nth-child(2) { top: 120px; right: 40px; } /* Poll */
+        .phase:nth-child(3) { bottom: 120px; right: 40px; } /* Check */
+        .phase:nth-child(4) { bottom: 40px; left: 50%; transform: translateX(-50%); } /* Close */
+        .phase:nth-child(5) { top: 120px; left: 40px; } /* Microtasks */
+
+        .speed-control {
+            margin-bottom: 24px;
+        }
+
+        .speed-slider {
+            width: 100%;
+            margin-top: 12px;
+            height: 6px;
+            border-radius: 3px;
+            background: #374151;
+            outline: none;
+            -webkit-appearance: none;
+        }
+
+        .speed-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            border: 2px solid #1e293b;
+        }
+
+        .speed-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            border: 2px solid #1e293b;
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #374151;
+            border-radius: 4px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4b5563;
+        }
+
+        @media (max-width: 1200px) {
+            .container {
+                grid-template-columns: 280px 1fr 280px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto 1fr;
+                height: auto;
+                min-height: 100vh;
+            }
+            
+            .loop-container {
+                width: 360px;
+                height: 360px;
+            }
+            
+            .phase {
+                width: 80px;
+                height: 80px;
+                font-size: 10px;
+            }
+            
+            .code-editor {
+                height: 180px;
+            }
+            
+            .log-panel {
+                height: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Left Panel - Code Input -->
+        <div class="left-panel">
+            <h3 class="section-title">Code Input</h3>
+            
+            <div class="code-input">
+                <h4 class="section-title" style="font-size: 0.875rem; margin-bottom: 8px;">Enter JavaScript Code:</h4>
+                <textarea class="code-editor" id="codeEditor" placeholder="// Example:
+setTimeout(() => console.log('Timer 1'), 100);
+Promise.resolve().then(() => console.log('Promise 1'));
+setTimeout(() => console.log('Timer 2'), 0);
+setImmediate(() => console.log('Immediate 1'));
+process.nextTick(() => console.log('NextTick 1'));
+console.log('Sync code');"></textarea>
+            </div>
+
+            <div class="controls">
+                <button class="btn" id="parseCode">Parse Code</button>
+                <button class="btn" id="clearCode">Clear</button>
+            </div>
+
+            <div class="speed-control">
+                <h3>Animation Speed:</h3>
+                <input type="range" class="speed-slider" id="speedSlider" min="0.1" max="3" step="0.1" value="1">
+                <div>Speed: <span id="speedValue">1x</span></div>
+            </div>
+        </div>
+
+        <!-- Center Panel - Visualizer -->
+        <div class="visualizer">
+            <div class="status-indicator stopped" id="statusIndicator">● STOPPED</div>
+            
+            <div class="controls" style="justify-content: center; margin-bottom: 24px;">
+                <button class="btn primary" id="startBtn">▶ Start</button>
+                <button class="btn" id="nextBtn">⏭ Next</button>
+                <button class="btn" id="pauseBtn" disabled>⏸ Pause</button>
+                <button class="btn" id="resetBtn">🔄 Reset</button>
+            </div>
+
+            <div class="event-loop" id="eventLoop">
+                <div class="loop-container">
+                    <div class="phase" data-phase="timers">
+                    <div>TIMERS<br><small>setTimeout<br>setInterval</small></div>
+                </div>
+                <div class="phase" data-phase="poll">
+                    <div>POLL<br><small>I/O operations<br>fs.readFile</small></div>
+                </div>
+                <div class="phase" data-phase="check">
+                    <div>CHECK<br><small>setImmediate<br>callbacks</small></div>
+                </div>
+                <div class="phase" data-phase="close">
+                    <div>CLOSE<br><small>socket.close()<br>cleanup</small></div>
+                </div>
+                <div class="phase" data-phase="microtasks">
+                    <div>MICROTASKS<br><small>Promise.then<br>process.nextTick</small></div>
+                </div>
+
+                    <!-- Arrows between phases -->
+                    <div class="arrow" style="top: 90px; left: 190px; width: 60px; transform: rotate(45deg);"></div>
+                    <div class="arrow" style="top: 240px; right: 90px; width: 60px; transform: rotate(90deg);"></div>
+                    <div class="arrow" style="bottom: 90px; right: 190px; width: 60px; transform: rotate(135deg);"></div>
+                    <div class="arrow" style="bottom: 240px; left: 90px; width: 60px; transform: rotate(270deg);"></div>
+                    <div class="arrow" style="top: 240px; left: 90px; width: 60px; transform: rotate(225deg);"></div>
+
+                    <!-- Queues -->
+                    <div class="microtask-queue">
+                        <div class="queue-title">Microtask Queue</div>
+                        <div id="microtaskItems"></div>
+                    </div>
+
+                    <div class="callback-queue">
+                        <div class="queue-title">Callback Queue</div>
+                        <div id="callbackItems"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel - Execution Log -->
+        <div class="right-panel">
+            <h3 class="section-title">Execution Log</h3>
+            <div class="log-panel">
+                <div id="logEntries"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class EventLoopVisualizer {
+            constructor() {
+                this.phases = ['timers', 'poll', 'check', 'close'];
+                this.currentPhase = 0;
+                this.isRunning = false;
+                this.isPaused = false;
+                this.tasks = [];
+                this.microtasks = [];
+                this.callbacks = [];
+                this.executedTasks = [];
+                this.animationSpeed = 1;
+                this.stepIndex = 0;
+                
+                this.initializeElements();
+                this.bindEvents();
+                this.setupInitialState();
+            }
+
+            initializeElements() {
+                this.startBtn = document.getElementById('startBtn');
+                this.nextBtn = document.getElementById('nextBtn');
+                this.pauseBtn = document.getElementById('pauseBtn');
+                this.resetBtn = document.getElementById('resetBtn');
+                this.parseBtn = document.getElementById('parseCode');
+                this.clearBtn = document.getElementById('clearCode');
+                this.codeEditor = document.getElementById('codeEditor');
+                this.speedSlider = document.getElementById('speedSlider');
+                this.speedValue = document.getElementById('speedValue');
+                this.statusIndicator = document.getElementById('statusIndicator');
+                this.logEntries = document.getElementById('logEntries');
+                this.microtaskItems = document.getElementById('microtaskItems');
+                this.callbackItems = document.getElementById('callbackItems');
+                this.eventLoop = document.getElementById('eventLoop');
+            }
+
+            bindEvents() {
+                this.startBtn.addEventListener('click', () => this.startSimulation());
+                this.nextBtn.addEventListener('click', () => this.nextStep());
+                this.pauseBtn.addEventListener('click', () => this.pauseSimulation());
+                this.resetBtn.addEventListener('click', () => this.resetSimulation());
+                this.parseBtn.addEventListener('click', () => this.parseCode());
+                this.clearBtn.addEventListener('click', () => this.clearCode());
+                
+                this.speedSlider.addEventListener('input', (e) => {
+                    this.animationSpeed = parseFloat(e.target.value);
+                    this.speedValue.textContent = `${this.animationSpeed}x`;
+                });
+            }
+
+            setupInitialState() {
+                this.updateStatus('stopped');
+                this.highlightPhase(0);
+                this.loadDefaultCode();
+            }
+
+            loadDefaultCode() {
+                this.codeEditor.value = `// Node.js Event Loop Demo
+setTimeout(() => console.log('Timer 1'), 100);
+Promise.resolve().then(() => console.log('Promise 1'));
+setTimeout(() => console.log('Timer 2'), 0);
+setImmediate(() => console.log('Immediate 1'));
+process.nextTick(() => console.log('NextTick 1'));
+console.log('Sync code');
+Promise.resolve().then(() => console.log('Promise 2'));
+setTimeout(() => console.log('Timer 3'), 50);`;
+            }
+
+            parseCode() {
+                const code = this.codeEditor.value.trim();
+                if (!code) {
+                    this.addLog('Please enter some JavaScript code', 'queue');
+                    return;
+                }
+
+                this.tasks = [];
+                this.microtasks = [];
+                this.callbacks = [];
+                this.executedTasks = [];
+
+                // Simple parsing - in a real implementation, you'd use an AST parser
+                const lines = code.split('\n');
+                let taskId = 1;
+
+                lines.forEach((line, index) => {
+                    line = line.trim();
+                    if (!line || line.startsWith('//')) return;
+
+                    if (line.includes('setTimeout')) {
+                        const delay = this.extractDelay(line) || 0;
+                        const content = this.extractContent(line);
+                        this.tasks.push({
+                            id: taskId++,
+                            type: 'timer',
+                            phase: 'timers',
+                            delay: delay,
+                            content: content,
+                            line: index + 1
+                        });
+                    } else if (line.includes('setImmediate')) {
+                        const content = this.extractContent(line);
+                        this.tasks.push({
+                            id: taskId++,
+                            type: 'immediate',
+                            phase: 'check',
+                            delay: 0,
+                            content: content,
+                            line: index + 1
+                        });
+                    } else if (line.includes('Promise')) {
+                        const content = this.extractContent(line);
+                        this.microtasks.push({
+                            id: taskId++,
+                            type: 'promise',
+                            phase: 'microtasks',
+                            content: content,
+                            line: index + 1
+                        });
+                    } else if (line.includes('process.nextTick')) {
+                        const content = this.extractContent(line);
+                        this.microtasks.push({
+                            id: taskId++,
+                            type: 'nextTick',
+                            phase: 'microtasks',
+                            content: content,
+                            line: index + 1,
+                            priority: 1 // Higher priority than promises
+                        });
+                    } else if (line.includes('console.log') && !line.includes('=>')) {
+                        const content = this.extractContent(line);
+                        this.executedTasks.push({
+                            id: taskId++,
+                            type: 'sync',
+                            content: content,
+                            line: index + 1
+                        });
+                    }
+                });
+
+                // Sort microtasks by priority (nextTick first)
+                this.microtasks.sort((a, b) => (b.priority || 0) - (a.priority || 0));
+
+                this.addLog(`Parsed ${this.tasks.length + this.microtasks.length} async tasks`, 'queue');
+                this.updateQueues();
+            }
+
+            extractDelay(line) {
+                const match = line.match(/setTimeout\([^,]+,\s*(\d+)\)/);
+                return match ? parseInt(match[1]) : 0;
+            }
+
+            extractContent(line) {
+                // Extract the content from console.log or function body
+                let match = line.match(/console\.log\(['"`]([^'"`]+)['"`]\)/);
+                if (match) return match[1];
+                
+                match = line.match(/=>\s*console\.log\(['"`]([^'"`]+)['"`]\)/);
+                if (match) return match[1];
+                
+                return line.substring(0, 30) + '...';
+            }
+
+            clearCode() {
+                this.codeEditor.value = '';
+                this.tasks = [];
+                this.microtasks = [];
+                this.callbacks = [];
+                this.executedTasks = [];
+                this.updateQueues();
+                this.clearLog();
+            }
+
+            startSimulation() {
+                if (this.tasks.length === 0 && this.microtasks.length === 0) {
+                    this.addLog('Please parse some code first', 'queue');
+                    return;
+                }
+
+                this.isRunning = true;
+                this.isPaused = false;
+                this.stepIndex = 0;
+                this.updateStatus('running');
+                this.updateButtons();
+                
+                this.addLog('=== SIMULATION STARTED ===', 'phase');
+                
+                // Execute synchronous tasks first
+                this.executedTasks.forEach(task => {
+                    this.addLog(`Executing: ${task.content}`, 'execute');
+                });
+                
+                this.runEventLoop();
+            }
+
+            async runEventLoop() {
+                while (this.isRunning && !this.isPaused && (this.tasks.length > 0 || this.microtasks.length > 0 || this.callbacks.length > 0)) {
+                    await this.executePhase();
+                    await this.sleep(1000 / this.animationSpeed);
+                }
+                
+                if (this.isRunning) {
+                    this.addLog('=== SIMULATION COMPLETE ===', 'phase');
+                    this.stopSimulation();
+                }
+            }
+
+            async executePhase() {
+                const currentPhaseName = this.phases[this.currentPhase];
+                this.highlightPhase(this.currentPhase);
+                this.addLog(`Entering ${currentPhaseName.toUpperCase()} phase`, 'phase');
+
+                // Execute tasks for current phase
+                if (currentPhaseName === 'timers') {
+                    await this.executeTimers();
+                } else if (currentPhaseName === 'poll') {
+                    await this.executePoll();
+                } else if (currentPhaseName === 'check') {
+                    await this.executeCheck();
+                } else if (currentPhaseName === 'close') {
+                    await this.executeClose();
+                }
+
+                // Always check microtasks after each phase
+                await this.executeMicrotasks();
+
+                // Move to next phase
+                this.currentPhase = (this.currentPhase + 1) % this.phases.length;
+                
+                if (this.currentPhase === 0) {
+                    this.addLog('--- Completed one event loop cycle ---', 'complete');
+                }
+            }
+
+            async executeTimers() {
+                const readyTimers = this.tasks.filter(task => 
+                    task.type === 'timer' && task.delay <= 100 // Simulate time passing
+                );
+                
+                for (const timer of readyTimers) {
+                    await this.animateTaskExecution(timer);
+                    this.addLog(`Executing Timer: ${timer.content}`, 'execute');
+                    this.tasks = this.tasks.filter(t => t.id !== timer.id);
+                }
+                
+                this.updateQueues();
+            }
+
+            async executePoll() {
+                // Simulate I/O operations
+                this.addLog('Polling for I/O operations...', 'execute');
+                await this.sleep(500 / this.animationSpeed);
+            }
+
+            async executeCheck() {
+                const immediates = this.tasks.filter(task => task.type === 'immediate');
+                
+                for (const immediate of immediates) {
+                    await this.animateTaskExecution(immediate);
+                    this.addLog(`Executing Immediate: ${immediate.content}`, 'execute');
+                    this.tasks = this.tasks.filter(t => t.id !== immediate.id);
+                }
+                
+                this.updateQueues();
+            }
+
+            async executeClose() {
+                // Simulate close callbacks
+                this.addLog('Checking for close callbacks...', 'execute');
+                await this.sleep(300 / this.animationSpeed);
+            }
+
+            async executeMicrotasks() {
+                if (this.microtasks.length === 0) return;
+                
+                this.addLog('Executing ALL microtasks...', 'phase');
+                
+                while (this.microtasks.length > 0) {
+                    const microtask = this.microtasks.shift();
+                    await this.animateTaskExecution(microtask);
+                    this.addLog(`Executing ${microtask.type}: ${microtask.content}`, 'execute');
+                    await this.sleep(300 / this.animationSpeed);
+                }
+                
+                this.updateQueues();
+            }
+
+            async animateTaskExecution(task) {
+                const taskBlock = document.createElement('div');
+                taskBlock.className = 'task-block';
+                taskBlock.textContent = task.content;
+                
+                // Start from queue
+                const startX = task.phase === 'microtasks' ? 600 : 650;
+                const startY = task.phase === 'microtasks' ? 150 : 450;
+                
+                taskBlock.style.left = startX + 'px';
+                taskBlock.style.top = startY + 'px';
+                
+                this.eventLoop.appendChild(taskBlock);
+                
+                // Animate to center
+                gsap.set(taskBlock, { opacity: 1 });
+                gsap.to(taskBlock, {
+                    x: -200,
+                    y: -100,
+                    duration: 0.5 / this.animationSpeed,
+                    ease: "power2.out"
+                });
+                
+                await this.sleep(500 / this.animationSpeed);
+                
+                // Fade out
+                gsap.to(taskBlock, {
+                    opacity: 0,
+                    scale: 0.5,
+                    duration: 0.3 / this.animationSpeed,
+                    onComplete: () => {
+                        if (taskBlock.parentNode) {
+                            taskBlock.parentNode.removeChild(taskBlock);
+                        }
+                    }
+                });
+            }
+
+            nextStep() {
+                if (!this.isRunning && (this.tasks.length > 0 || this.microtasks.length > 0)) {
+                    this.isRunning = true;
+                    this.updateStatus('running');
+                }
+                
+                this.executePhase().then(() => {
+                    this.isRunning = false;
+                    this.updateStatus('paused');
+                    this.updateButtons();
+                });
+            }
+
+            pauseSimulation() {
+                this.isPaused = true;
+                this.updateStatus('paused');
+                this.updateButtons();
+            }
+
+            resetSimulation() {
+                this.isRunning = false;
+                this.isPaused = false;
+                this.currentPhase = 0;
+                this.stepIndex = 0;
+                this.updateStatus('stopped');
+                this.updateButtons();
+                this.highlightPhase(0);
+                this.clearLog();
+                this.parseCode(); // Reload tasks
+            }
+
+            stopSimulation() {
+                this.isRunning = false;
+                this.isPaused = false;
+                this.updateStatus('stopped');
+                this.updateButtons();
+            }
+
+            highlightPhase(phaseIndex) {
+                const phases = document.querySelectorAll('.phase');
+                const arrows = document.querySelectorAll('.arrow');
+                
+                phases.forEach((phase, index) => {
+                    phase.classList.remove('active', 'next');
+                    if (index === phaseIndex) {
+                        phase.classList.add('active');
+                    } else if (index === (phaseIndex + 1) % this.phases.length) {
+                        phase.classList.add('next');
+                    }
+                });
+                
+                arrows.forEach((arrow, index) => {
+                    arrow.classList.remove('active');
+                    if (index === phaseIndex) {
+                        arrow.classList.add('active');
+                    }
+                });
+
+                // Add phase transition animation
+                gsap.from(phases[phaseIndex], {
+                    scale: 1,
+                    duration: 0.3,
+                    ease: "back.out(1.7)"
+                });
+            }
+
+            updateQueues() {
+                // Update microtask queue
+                this.microtaskItems.innerHTML = '';
+                this.microtasks.forEach(task => {
+                    const item = document.createElement('div');
+                    item.className = 'queue-item';
+                    item.textContent = `${task.type}: ${task.content.substring(0, 15)}...`;
+                    this.microtaskItems.appendChild(item);
+                });
+
+                // Update callback queue  
+                this.callbackItems.innerHTML = '';
+                this.tasks.forEach(task => {
+                    const item = document.createElement('div');
+                    item.className = 'queue-item';
+                    item.textContent = `${task.type}: ${task.content.substring(0, 15)}...`;
+                    this.callbackItems.appendChild(item);
+                });
+            }
+
+            updateStatus(status) {
+                this.statusIndicator.className = `status-indicator ${status}`;
+                const statusText = {
+                    'running': '● RUNNING',
+                    'paused': '⏸ PAUSED', 
+                    'stopped': '● STOPPED'
+                };
+                this.statusIndicator.textContent = statusText[status] || '● UNKNOWN';
+            }
+
+            updateButtons() {
+                this.startBtn.disabled = this.isRunning && !this.isPaused;
+                this.nextBtn.disabled = this.isRunning && !this.isPaused;
+                this.pauseBtn.disabled = !this.isRunning || this.isPaused;
+            }
+
+            addLog(message, type = 'queue') {
+                const entry = document.createElement('div');
+                entry.className = `log-entry ${type}`;
+                entry.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+                
+                this.logEntries.appendChild(entry);
+                
+                // Animate entry
+                gsap.to(entry, {
+                    opacity: 1,
+                    x: 0,
+                    duration: 0.3,
+                    ease: "power2.out"
+                });
+                
+                // Auto scroll
+                this.logEntries.scrollTop = this.logEntries.scrollHeight;
+            }
+
+            clearLog() {
+                this.logEntries.innerHTML = '';
+            }
+
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+        }
+
+        // Initialize the visualizer when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            new EventLoopVisualizer();
+        });
+    </script>
+</body>
+</html>
